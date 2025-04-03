@@ -17,8 +17,8 @@ const server = net.createServer((socket) => {
   });
 });
 
-// Define port
-const port = 3000;
+// Use port 4221 as specified by the test
+const port = 4221;
 
 // Start the server
 server.listen(port, () => {
