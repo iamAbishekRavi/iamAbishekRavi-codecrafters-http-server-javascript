@@ -7,7 +7,7 @@ const server = net.createServer((socket) => {
         // Extract the requested string from the request
         const match = request.match(/GET \/echo\/([^ ]+) HTTP/);
         if (!match) {
-            socket.end('HTTP/1.1 404 Bad Request\r\n\r\n');
+            socket.end('HTTP/1.1 404 Not Found \r\n\r\n');
             return;
         }
 
