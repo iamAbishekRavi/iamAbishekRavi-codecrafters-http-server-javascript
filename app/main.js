@@ -5,16 +5,8 @@ const server = net.createServer((socket) => {
         const request = data.toString();
         
         // Match the request path
-        const echoMatch = request.match(/GET \/echo\/([^ ]+) HTTP/);
-        const rootMatch = request.match(/GET \/ HTTP/);
-
-        if (rootMatch) {
-            // Handle requests to "/"
-            const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK`;
-            socket.write(responseHeaders);
-            socket.end();
-            return;
-        }
+        const echoMatch = request.match(/GET \/User-Agent\/([^ ]+) HTTP/);
+    
 
         if (echoMatch) {
             // Handle "/echo/{str}"
@@ -27,11 +19,9 @@ const server = net.createServer((socket) => {
             return;
         }
 
-        // Handle unknown routes with 404
-        socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
-    });
-});
-
 server.listen(4221, '0.0.0.0', () => {
     console.log('Server running on port 4221');
+});
+
+});
 });
