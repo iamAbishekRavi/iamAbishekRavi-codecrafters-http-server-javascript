@@ -9,16 +9,17 @@ const server = net.createServer((socket) => {
     const request = data.toString();
     
     // Simple regex to extract the path from the request
-    const pathMatch = request.match(/GET\s+(\/[^\s]*)\s+HTTP/);
-    const path = pathMatch ? pathMatch[1] : null;
-    
-    if (path === '/') {
-      // Root path: return 200 OK
-      socket.write('HTTP/1.1 200 OK\r\n\r\n');
-    } else {
+    const pathMatch = request.match(/GET \/echo\/(.+)HTTP/);
+    if (!pathMatch) {
       // Any other path: return 404 Not Found
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      return;
     }
+
+   const responseString = pathMatch[1];
+   const requestHEader =  `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${responseString.length}\r\n\r\n`;
+   socket.write(requestHEader + responseString);
+    // Log the response to the console
     
     // Close the connection after sending the response
     socket.end();
