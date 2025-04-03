@@ -4,20 +4,31 @@ const server = net.createServer((socket) => {
     socket.on('data', (data) => {
         const request = data.toString();
         
-        // Extract the requested string from the request
-        const match = request.match(/GET \/echo\/([^ ]+) HTTP/);
-        if (!match) {
-            socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
+        // Match the request path
+        const echoMatch = request.match(/GET \/echo\/([^ ]+) HTTP/);
+        const rootMatch = request.match(/GET \/ HTTP/);
+
+        if (rootMatch) {
+            // Handle requests to "/"
+            const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK`;
+            socket.write(responseHeaders);
+            socket.end();
             return;
         }
 
-        const responseString = match[1];
-        const contentLength = Buffer.byteLength(responseString, 'utf-8');
-        const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n`;
+        if (echoMatch) {
+            // Handle "/echo/{str}"
+            const responseString = echoMatch[1];
+            const contentLength = Buffer.byteLength(responseString, 'utf-8');
+            const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n`;
 
-        // Send response
-        socket.write(responseHeaders + responseString);
-        socket.end();
+            socket.write(responseHeaders + responseString);
+            socket.end();
+            return;
+        }
+
+        // Handle unknown routes with 404
+        socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
     });
 });
 
