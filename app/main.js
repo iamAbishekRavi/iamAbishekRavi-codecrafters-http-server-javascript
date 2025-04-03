@@ -3,7 +3,6 @@ const net = require('net');
 const server = net.createServer((socket) => {
     socket.on('data', (data) => {
         const request = data.toString();
-        
         // Match the "/user-agent" request
         const userAgentMatch = request.match(/GET \/user-agent HTTP/);
         if (userAgentMatch) {
