@@ -22,6 +22,24 @@ const server = net.createServer((socket) => {
             return;
         }
 
+        // Match "/user-agent" and extract the User-Agent header
+        if (request.startsWith("GET /user-agent HTTP/")) {
+            const userAgentMatch = request.match(/User-Agent: (.+)\r\n/);
+            if (!userAgentMatch) {
+                socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+                socket.end();
+                return;
+            }
+
+            const userAgent = userAgentMatch[1];
+            const contentLength = Buffer.byteLength(userAgent, "utf-8");
+
+            const response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n${userAgent}`;
+            socket.write(response);
+            socket.end();
+            return;
+        }
+
         // Match "/files/{filename}"
         const fileMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
         if (fileMatch) {
