@@ -4,6 +4,15 @@ const server = net.createServer((socket) => {
     socket.on('data', (data) => {
         const request = data.toString();
 
+        // Match the request for the root path "/"
+        const rootMatch = request.match(/^GET \/ HTTP/);
+        if (rootMatch) {
+            const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK`;
+            socket.write(responseHeaders);
+            socket.end();
+            return;
+        }
+
         // Match the "/echo/{string}" request
         const echoMatch = request.match(/^GET \/echo\/([^ ]+) HTTP/);
         if (echoMatch) {
@@ -20,7 +29,6 @@ const server = net.createServer((socket) => {
         // Match the "/user-agent" request
         const userAgentMatch = request.match(/^GET \/user-agent HTTP/);
         if (userAgentMatch) {
-            // Extract "User-Agent" header
             const userAgentHeader = request.match(/User-Agent: (.+)\r\n/);
             if (userAgentHeader) {
                 const userAgentValue = userAgentHeader[1];
