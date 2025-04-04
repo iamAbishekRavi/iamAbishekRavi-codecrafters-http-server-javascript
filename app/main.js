@@ -1,52 +1,60 @@
 const net = require('net');
+const fs = require('fs');
+const path = require('path');
+
+// Get the directory from command-line arguments
+const args = process.argv;
+const dirIndex = args.indexOf("--directory");
+const filesDirectory = dirIndex !== -1 ? args[dirIndex + 1] : null;
+
+if (!filesDirectory) {
+    console.error("Error: No directory specified. Use --directory <path>");
+    process.exit(1);
+}
 
 const server = net.createServer((socket) => {
-    socket.on('data', (data) => {
+    socket.on("data", (data) => {
         const request = data.toString();
+        
+        // Match "/files/{filename}"
+        const fileMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
+        if (fileMatch) {
+            const filename = fileMatch[1];
+            const filePath = path.join(filesDirectory, filename);
 
-        // Match the request for the root path "/"
-        const rootMatch = request.match(/^GET \/ HTTP/);
-        if (rootMatch) {
-            const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK`;
-            socket.write(responseHeaders);
-            socket.end();
+            // Check if the file exists
+            fs.stat(filePath, (err, stats) => {
+                if (err || !stats.isFile()) {
+                    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+                    socket.end();
+                    return;
+                }
+
+                // Read the file
+                fs.readFile(filePath, (err, content) => {
+                    if (err) {
+                        socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+                        socket.end();
+                        return;
+                    }
+
+                    const contentLength = Buffer.byteLength(content, 'utf-8');
+                    const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${contentLength}\r\n\r\n`;
+
+                    socket.write(responseHeaders);
+                    socket.write(content);
+                    socket.end();
+                });
+            });
             return;
-        }
-
-        // Match the "/echo/{string}" request
-        const echoMatch = request.match(/^GET \/echo\/([^ ]+) HTTP/);
-        if (echoMatch) {
-            const responseString = echoMatch[1];
-            const contentLength = Buffer.byteLength(responseString, 'utf-8');
-
-            const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n`;
-
-            socket.write(responseHeaders + responseString);
-            socket.end();
-            return;
-        }
-
-        // Match the "/user-agent" request
-        const userAgentMatch = request.match(/^GET \/user-agent HTTP/);
-        if (userAgentMatch) {
-            const userAgentHeader = request.match(/User-Agent: (.+)\r\n/);
-            if (userAgentHeader) {
-                const userAgentValue = userAgentHeader[1];
-                const contentLength = Buffer.byteLength(userAgentValue, 'utf-8');
-
-                const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n`;
-
-                socket.write(responseHeaders + userAgentValue);
-                socket.end();
-                return;
-            }
         }
 
         // Handle unknown routes with 404
-        socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+        socket.end();
     });
 });
 
-server.listen(4221, '0.0.0.0', () => {
-    console.log('Server running on port 4221');
+server.listen(4221, "0.0.0.0", () => {
+    console.log("Server running on port 4221");
 });
