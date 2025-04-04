@@ -1,6 +1,7 @@
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 
 const args = process.argv;
 const dirIndex = args.indexOf("--directory");
@@ -14,7 +15,7 @@ const server = net.createServer((socket) => {
     socket.on("data", (chunk) => {
         requestData += chunk.toString();
 
-        // Check if we have received the full request
+        // Check if we received the full request
         if (requestData.includes("\r\n\r\n")) {
             handleRequest(socket, requestData);
         }
@@ -31,12 +32,30 @@ function handleRequest(socket, request) {
     const userAgentMatch = request.match(/^GET \/user-agent HTTP/);
     const fileGetMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
     const filePostMatch = request.match(/^POST \/files\/([^ ]+) HTTP/);
+    const acceptEncodingMatch = request.match(/Accept-Encoding: (.+)\r\n/);
 
-    // Handle `/echo/{str}`
+    let contentEncoding = null;
+    if (acceptEncodingMatch) {
+        const encoding = acceptEncodingMatch[1].trim();
+        if (encoding === "gzip") {
+            contentEncoding = "gzip";
+        }
+    }
+
+    // Handle `/echo/{message}`
     if (echoMatch) {
         const responseStr = echoMatch[1];
-        const contentLength = Buffer.byteLength(responseStr, "utf-8");
-        socket.write(`HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n${responseStr}`);
+        let responseBody = responseStr;
+        let headers = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n`;
+
+        if (contentEncoding === "gzip") {
+            responseBody = zlib.gzipSync(responseStr);
+            headers += `Content-Encoding: gzip\r\n`;
+        }
+
+        headers += `Content-Length: ${Buffer.byteLength(responseBody)}\r\n\r\n`;
+        socket.write(headers);
+        socket.write(responseBody);
         socket.end();
         return;
     }
@@ -75,18 +94,10 @@ function handleRequest(socket, request) {
                 return;
             }
 
-            fs.readFile(filePath, (err, content) => {
-                if (err) {
-                    socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-                    socket.end();
-                    return;
-                }
-
-                const contentLength = Buffer.byteLength(content, "utf-8");
-                socket.write(`HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${contentLength}\r\n\r\n`);
-                socket.write(content);
-                socket.end();
-            });
+            const fileStream = fs.createReadStream(filePath);
+            socket.write(`HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${stats.size}\r\n\r\n`);
+            fileStream.pipe(socket, { end: false });
+            fileStream.on("end", () => socket.end());
         });
         return;
     }
@@ -96,36 +107,33 @@ function handleRequest(socket, request) {
         const filename = filePostMatch[1];
         const filePath = path.join(filesDirectory, filename);
 
-        // Extract the request body
-        const contentStart = request.indexOf("\r\n\r\n") + 4;
-        const body = request.substring(contentStart);
-        const contentLengthMatch = request.match(/Content-Length: (\d+)\r\n/);
-        const expectedLength = contentLengthMatch ? parseInt(contentLengthMatch[1], 10) : body.length;
-
-        if (Buffer.byteLength(body, "utf-8") !== expectedLength) {
+        const bodyMatch = request.split("\r\n\r\n")[1];
+        if (!bodyMatch) {
             socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
             socket.end();
             return;
         }
 
-        fs.writeFile(filePath, body, (err) => {
+        fs.writeFile(filePath, bodyMatch, (err) => {
             if (err) {
                 socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-                socket.end();
-                return;
+            } else {
+                socket.write("HTTP/1.1 201 Created\r\n\r\n");
             }
-
-            socket.write("HTTP/1.1 201 Created\r\n\r\n");
             socket.end();
         });
         return;
     }
 
-    // Default 404 Response
+    // Handle unknown paths
     socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
     socket.end();
 }
 
-server.listen(4221, "0.0.0.0", () => {
-    console.log(`Server running on port 4221${filesDirectory ? `, serving files from ${filesDirectory}` : ""}`);
-});
+// Ensure directory is provided
+if (!filesDirectory) {
+    console.error("Error: No directory specified. Use --directory <path>");
+    process.exit(1);
+}
+
+server.listen(4221, () => console.log("Server running on port 4221"));
