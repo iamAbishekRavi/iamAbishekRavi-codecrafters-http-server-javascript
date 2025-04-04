@@ -1,55 +1,47 @@
-const net = require('net');
-const fs = require('fs');
-const path = require('path');
+socket.on("data", (data) => {
+    const request = data.toString();
+    console.log(`Request received:\n${request}`);
 
-const args = process.argv;
-const dirIndex = args.indexOf("--directory");
-const filesDirectory = dirIndex !== -1 ? args[dirIndex + 1] : "/tmp"; // Default directory if not specified
+    // Match "/"
+    if (request.startsWith("GET / HTTP/")) {
+        const response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK";
+        socket.write(response);
+        socket.end();
+        return;
+    }
 
-const server = net.createServer((socket) => {
-    console.log("New client connected");
+    // Match "/files/{filename}"
+    const fileMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
+    if (fileMatch) {
+        const filename = fileMatch[1];
+        const filePath = path.join(filesDirectory, filename);
 
-    socket.on("data", (data) => {
-        const request = data.toString();
-        console.log(`Request received:\n${request}`);
+        fs.stat(filePath, (err, stats) => {
+            if (err || !stats.isFile()) {
+                socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+                socket.end();
+                return;
+            }
 
-        const fileMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
-        if (fileMatch) {
-            const filename = fileMatch[1];
-            const filePath = path.join(filesDirectory, filename);
-
-            fs.stat(filePath, (err, stats) => {
-                if (err || !stats.isFile()) {
-                    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+            fs.readFile(filePath, (err, content) => {
+                if (err) {
+                    socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
                     socket.end();
                     return;
                 }
 
-                fs.readFile(filePath, (err, content) => {
-                    if (err) {
-                        socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-                        socket.end();
-                        return;
-                    }
+                const contentLength = Buffer.byteLength(content, 'utf-8');
+                const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${contentLength}\r\n\r\n`;
 
-                    const contentLength = Buffer.byteLength(content, 'utf-8');
-                    const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${contentLength}\r\n\r\n`;
-
-                    socket.write(responseHeaders);
-                    socket.write(content);
-                    socket.end();
-                });
+                socket.write(responseHeaders);
+                socket.write(content);
+                socket.end();
             });
-            return;
-        }
+        });
+        return;
+    }
 
-        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-        socket.end();
-    });
-
-    socket.on("end", () => console.log("Client disconnected"));
-});
-
-server.listen(4221, "0.0.0.0", () => {
-    console.log("Server running on port 4221");
+    // Default 404 Response
+    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+    socket.end();
 });
