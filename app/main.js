@@ -2,27 +2,22 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 
-// Get the directory from command-line arguments
 const args = process.argv;
 const dirIndex = args.indexOf("--directory");
-const filesDirectory = dirIndex !== -1 ? args[dirIndex + 1] : null;
-
-if (!filesDirectory) {
-    console.error("Error: No directory specified. Use --directory <path>");
-    process.exit(1);
-}
+const filesDirectory = dirIndex !== -1 ? args[dirIndex + 1] : "/tmp"; // Default directory if not specified
 
 const server = net.createServer((socket) => {
+    console.log("New client connected");
+
     socket.on("data", (data) => {
         const request = data.toString();
-        
-        // Match "/files/{filename}"
+        console.log(`Request received:\n${request}`);
+
         const fileMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
         if (fileMatch) {
             const filename = fileMatch[1];
             const filePath = path.join(filesDirectory, filename);
 
-            // Check if the file exists
             fs.stat(filePath, (err, stats) => {
                 if (err || !stats.isFile()) {
                     socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
@@ -30,7 +25,6 @@ const server = net.createServer((socket) => {
                     return;
                 }
 
-                // Read the file
                 fs.readFile(filePath, (err, content) => {
                     if (err) {
                         socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
@@ -49,10 +43,11 @@ const server = net.createServer((socket) => {
             return;
         }
 
-        // Handle unknown routes with 404
         socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
         socket.end();
     });
+
+    socket.on("end", () => console.log("Client disconnected"));
 });
 
 server.listen(4221, "0.0.0.0", () => {
