@@ -2,15 +2,9 @@ const net = require("net");
 const fs = require("fs");
 const path = require("path");
 
-// Parse command-line arguments to get the directory
 const args = process.argv;
 const dirIndex = args.indexOf("--directory");
 const filesDirectory = dirIndex !== -1 ? args[dirIndex + 1] : null;
-
-if (!filesDirectory) {
-    console.error("Error: No directory specified. Use --directory <path>");
-    process.exit(1);
-}
 
 const server = net.createServer((socket) => {
     console.log("New client connected");
@@ -19,9 +13,44 @@ const server = net.createServer((socket) => {
         const request = data.toString();
         console.log(`Request received:\n${request}`);
 
-        // Match "/files/{filename}"
+        const echoMatch = request.match(/^GET \/echo\/([^ ]+) HTTP/);
+        const rootMatch = request.match(/^GET \/ HTTP/);
+        const userAgentMatch = request.match(/^GET \/user-agent HTTP/);
         const fileMatch = request.match(/^GET \/files\/([^ ]+) HTTP/);
-        if (fileMatch) {
+
+        // Handle `/echo/{str}`
+        if (echoMatch) {
+            const responseStr = echoMatch[1];
+            const contentLength = Buffer.byteLength(responseStr, "utf-8");
+            socket.write(`HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n${responseStr}`);
+            socket.end();
+            return;
+        }
+
+        // Handle `/` root path
+        if (rootMatch) {
+            socket.write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n");
+            socket.end();
+            return;
+        }
+
+        // Handle `/user-agent`
+        if (userAgentMatch) {
+            const userAgentHeader = request.match(/User-Agent: (.+)\r\n/);
+            if (userAgentHeader) {
+                const userAgent = userAgentHeader[1];
+                const contentLength = Buffer.byteLength(userAgent, "utf-8");
+                socket.write(`HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${contentLength}\r\n\r\n${userAgent}`);
+                socket.end();
+            } else {
+                socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+                socket.end();
+            }
+            return;
+        }
+
+        // Handle `/files/{filename}`
+        if (fileMatch && filesDirectory) {
             const filename = fileMatch[1];
             const filePath = path.join(filesDirectory, filename);
 
@@ -40,9 +69,7 @@ const server = net.createServer((socket) => {
                     }
 
                     const contentLength = Buffer.byteLength(content, "utf-8");
-                    const responseHeaders = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${contentLength}\r\n\r\n`;
-
-                    socket.write(responseHeaders);
+                    socket.write(`HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${contentLength}\r\n\r\n`);
                     socket.write(content);
                     socket.end();
                 });
@@ -59,5 +86,5 @@ const server = net.createServer((socket) => {
 });
 
 server.listen(4221, "0.0.0.0", () => {
-    console.log(`Server running on port 4221, serving files from ${filesDirectory}`);
+    console.log(`Server running on port 4221${filesDirectory ? `, serving files from ${filesDirectory}` : ""}`);
 });
