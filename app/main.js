@@ -18,14 +18,16 @@ const server = http.createServer(async (req, res) => {
 
     res.setHeader("Content-Type", "text/plain");
     if (acceptEncoding.includes("gzip")) {
-      res.setHeader("Content-Encoding", "gzip");
       const gzipped = zlib.gzipSync(text);
-      res.setHeader("Content-Length", gzipped.length);
-      res.writeHead(200);
+      res.writeHead(200, {
+        "Content-Encoding": "gzip",
+        "Content-Length": gzipped.length,
+      });
       res.end(gzipped);
     } else {
-      res.setHeader("Content-Length", Buffer.byteLength(text));
-      res.writeHead(200);
+      res.writeHead(200, {
+        "Content-Length": Buffer.byteLength(text),
+      });
       res.end(text);
     }
     return;
@@ -34,8 +36,12 @@ const server = http.createServer(async (req, res) => {
   // /user-agent
   if (url === "/user-agent") {
     const userAgent = headers["user-agent"] || "";
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end(userAgent);
+    const buffer = Buffer.from(userAgent, "utf-8");
+    res.writeHead(200, {
+      "Content-Type": "text/plain",
+      "Content-Length": buffer.length,
+    });
+    res.end(buffer);
     return;
   }
 
@@ -70,8 +76,12 @@ const server = http.createServer(async (req, res) => {
 
   // Fallback for root and others
   if (url === "/") {
-    res.writeHead(200);
-    res.end("Welcome to the HTTP server!");
+    const message = "Welcome to the HTTP server!";
+    res.writeHead(200, {
+      "Content-Type": "text/plain",
+      "Content-Length": Buffer.byteLength(message),
+    });
+    res.end(message);
     return;
   }
 
