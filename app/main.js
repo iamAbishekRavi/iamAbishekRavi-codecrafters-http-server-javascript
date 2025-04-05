@@ -11,7 +11,6 @@ const baseDirectory = process.argv.includes("--directory")
 const server = http.createServer(async (req, res) => {
   const { method, url, headers } = req;
 
-  // /echo/:something
   if (url.startsWith("/echo/")) {
     const text = decodeURIComponent(url.slice(6));
     const acceptEncoding = headers["accept-encoding"] || "";
