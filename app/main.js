@@ -1,64 +1,81 @@
-const net = require("net");
+const net = require("net");// Import the net module to create a TCP server
+const fs = require("fs");// Import the fs module to handle file system operations
+const path = require("path");// Import the path module to handle file and directory paths   
 
-const PORT = 4221;
+const port = 4221;
+let staticDir = process.argv.includes("--directory")
+  ? process.argv[process.argv.indexOf("--directory") + 1]
+  : process.cwd();
 
-// Create the server and listen for connections
-const startServer = () => {
-  const listener = net.createServer();
+const initiateServer = () => {  // Create a TCP server
+  const srv = net.createServer();
 
-  listener.on("connection", (conn) => {
-    conn.on("data", (chunk) => {
-      const incoming = chunk.toString();
-      const lines = incoming.split("\r\n");
+  srv.on("connection", (sock) => {
+    let accumulated = "";
 
-      const [method, url] = lines[0].split(" ");
+    sock.on("data", (buffer) => {
+      accumulated += buffer.toString();
+
+      const splitPoint = accumulated.indexOf("\r\n\r\n");
+      if (splitPoint === -1) return;
+
+      const headerPart = accumulated.slice(0, splitPoint);
+      const bodyPart = accumulated.slice(splitPoint + 4);
+
+      const lines = headerPart.split("\r\n");
+      const [method, pathUrl] = lines[0].split(" ");
       const headers = {};
 
       for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (line === "") break;
-        const [hKey, hVal] = line.split(": ");
-        if (hKey && hVal) {
-          headers[hKey.toLowerCase()] = hVal;
-        }
+        const [key, value] = lines[i].split(": ");
+        if (key && value) headers[key.toLowerCase()] = value;
       }
 
-      // Parse Accept-Encoding
-      const acceptList = headers["accept-encoding"]
-        ? headers["accept-encoding"].split(",").map(enc => enc.trim().toLowerCase())
-        : [];
+      if (method === "POST" && pathUrl.startsWith("/files/")) {
+        const fileName = pathUrl.replace("/files/", "");
+        const fileTarget = path.join(staticDir, fileName);
 
-      const supportsGzip = acceptList.includes("gzip");
+        const declaredLength = parseInt(headers["content-length"], 10);
+        const incomingBody = bodyPart.slice(0, declaredLength);
 
-      let msg = "";
-      if (url.startsWith("/echo/")) {
-        msg = url.substring("/echo/".length);
+        fs.writeFileSync(fileTarget, incomingBody);
+
+        const reply = `HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n`;
+        sock.write(reply);
+        sock.end();
+        return;
       }
 
-      const rawPayload = msg; // The payload to be sent back
-      const meta = {
-        "Content-Type": "text/plain",
-        "Content-Length": Buffer.byteLength(rawPayload),
-      };
+      if (method === "GET" && pathUrl.startsWith("/echo/")) {
+        const message = pathUrl.slice("/echo/".length);
+        const encodings = headers["accept-encoding"]
+          ? headers["accept-encoding"].split(",").map(e => e.trim())
+          : [];
 
-      if (supportsGzip) {
-        meta["Content-Encoding"] = "gzip";
+        const useGzip = encodings.includes("gzip");
+
+        let responseHeaders = [
+          "HTTP/1.1 200 OK",
+          "Content-Type: text/plain",
+          `Content-Length: ${Buffer.byteLength(message)}`,
+        ];
+        if (useGzip) responseHeaders.push("Content-Encoding: gzip");
+
+        const res = `${responseHeaders.join("\r\n")}\r\n\r\n${message}`;
+        sock.write(res);
+        sock.end();
+        return;
       }
 
-      const headerBlock = Object.entries(meta) // Create the header block
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\r\n");
-
-      const finalResponse = `HTTP/1.1 200 OK\r\n${headerBlock}\r\n\r\n${rawPayload}`;
-
-      conn.write(finalResponse);
-      conn.end();
+      // Default fallback
+      sock.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+      sock.end();
     });
   });
 
-  listener.listen(PORT, () => {
-  console.log(`🔥 Server lit at http://localhost:${PORT}/`); //server is listening to 
+  srv.listen(port, () => {
+    console.log(`📡 Server on http://localhost:${port} | Static: ${staticDir}`); //Server is listening
   });
 };
 
-startServer();
+initiateServer();
