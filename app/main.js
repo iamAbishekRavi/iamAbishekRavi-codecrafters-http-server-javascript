@@ -1,111 +1,64 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
+const net = require("net");
 
-const port = 4221;
-const baseDirectory = process.argv.includes('--directory')
-  ? process.argv[process.argv.indexOf('--directory') + 1]
-  : path.join(__dirname, 'app');
+const PORT = 4221;
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const method = req.method;
-  const pathname = url.pathname;
+// Create the server and listen for connections
+const startServer = () => {
+  const listener = net.createServer();
 
-  // Handle GET /
-  if (pathname === '/') {
-    res.writeHead(200, {
-      'Content-Type': 'text/plain',
-      'Content-Length': '0',
-    });
-    return res.end();
-  }
+  listener.on("connection", (conn) => {
+    conn.on("data", (chunk) => {
+      const incoming = chunk.toString();
+      const lines = incoming.split("\r\n");
 
-  // Handle /echo/:message
-  if (pathname.startsWith('/echo/')) {
-    const message = pathname.replace('/echo/', '');
-    const encodings = (req.headers['accept-encoding'] || '')
-      .split(',')
-      .map(e => e.trim().toLowerCase());
+      const [method, url] = lines[0].split(" ");
+      const headers = {};
 
-    if (encodings.includes('gzip')) {
-      const buffer = Buffer.from(message);
-      zlib.gzip(buffer, (err, compressed) => {
-        if (err) {
-          res.writeHead(500);
-          return res.end();
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line === "") break;
+        const [hKey, hVal] = line.split(": ");
+        if (hKey && hVal) {
+          headers[hKey.toLowerCase()] = hVal;
         }
-        res.writeHead(200, {
-          'Content-Type': 'text/plain',
-          'Content-Encoding': 'gzip',
-          'Content-Length': compressed.length,
-        });
-        res.end(compressed);
-      });
-    } else {
-      res.writeHead(200, {
-        'Content-Type': 'text/plain',
-        'Content-Length': Buffer.byteLength(message),
-      });
-      res.end(message);
-    }
-    return;
-  }
+      }
 
-  // Handle /user-agent
-  if (pathname === '/user-agent') {
-    const ua = req.headers['user-agent'] || '';
-    res.writeHead(200, {
-      'Content-Type': 'text/plain',
-      'Content-Length': Buffer.byteLength(ua),
+      // Parse Accept-Encoding
+      const acceptList = headers["accept-encoding"]
+        ? headers["accept-encoding"].split(",").map(enc => enc.trim().toLowerCase())
+        : [];
+
+      const supportsGzip = acceptList.includes("gzip");
+
+      let msg = "";
+      if (url.startsWith("/echo/")) {
+        msg = url.substring("/echo/".length);
+      }
+
+      const rawPayload = msg; // The payload to be sent back
+      const meta = {
+        "Content-Type": "text/plain",
+        "Content-Length": Buffer.byteLength(rawPayload),
+      };
+
+      if (supportsGzip) {
+        meta["Content-Encoding"] = "gzip";
+      }
+
+      const headerBlock = Object.entries(meta) // Create the header block
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\r\n");
+
+      const finalResponse = `HTTP/1.1 200 OK\r\n${headerBlock}\r\n\r\n${rawPayload}`;
+
+      conn.write(finalResponse);
+      conn.end();
     });
-    return res.end(ua);
-  }
+  });
 
-  // Handle /files/:filename
-  if (pathname.startsWith('/files/')) {
-    const filename = pathname.replace('/files/', '');
-    const filePath = path.join(baseDirectory, filename);
+  listener.listen(PORT, () => {
+  console.log(`🔥 Server lit at http://localhost:${PORT}/`); //server is listening to 
+  });
+};
 
-    if (method === 'GET') {
-      fs.readFile(filePath, (err, data) => {
-        if (err) {
-          res.writeHead(404);
-          return res.end();
-        }
-        res.writeHead(200, {
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': data.length,
-        });
-        res.end(data);
-      });
-      return;
-    }
-
-    if (method === 'POST') {
-      let body = Buffer.alloc(0);
-      req.on('data', chunk => {
-        body = Buffer.concat([body, chunk]);
-      });
-      req.on('end', () => {
-        fs.writeFile(filePath, body, err => {
-          if (err) {
-            res.writeHead(500);
-            return res.end();
-          }
-          res.writeHead(201);
-          res.end();
-        });
-      });
-      return;
-    }
-  }
-
-  // Fallback
-  res.writeHead(404);
-  res.end();
-});
-server.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}/`);
-});
+startServer();
