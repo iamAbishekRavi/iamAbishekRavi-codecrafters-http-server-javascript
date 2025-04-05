@@ -1,6 +1,7 @@
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const server = net.createServer((socket) => {
   let buffer = Buffer.alloc(0);
@@ -8,13 +9,15 @@ const server = net.createServer((socket) => {
   socket.on('data', (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
 
-    const request = buffer.toString();
-    const headerEndIndex = request.indexOf('\r\n\r\n');
-    if (headerEndIndex === -1) return; // Wait for full headers
+    const requestStr = buffer.toString();
+    const headerEnd = requestStr.indexOf('\r\n\r\n');
+    if (headerEnd === -1) return; // Wait for full headers
 
-    const [headerPart] = request.split('\r\n\r\n');
-    const [requestLine, ...headerLines] = headerPart.split('\r\n');
-    const [method, requestPath] = requestLine.split(' ');
+    const headersPart = requestStr.slice(0, headerEnd);
+    const bodyStart = headerEnd + 4;
+    const requestLines = headersPart.split('\r\n');
+    const [requestLine, ...headerLines] = requestLines;
+    const [method, requestPath, _httpVersion] = requestLine.split(' ');
 
     const headers = {};
     for (const line of headerLines) {
@@ -24,25 +27,60 @@ const server = net.createServer((socket) => {
       }
     }
 
-    const contentLength = parseInt(headers['content-length'], 10);
-    if (isNaN(contentLength)) {
-      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    const contentLength = parseInt(headers['content-length'] || '0', 10);
+    const fullRequestLength = bodyStart + contentLength;
+
+    if (buffer.length < fullRequestLength) return; // Wait for full body
+    const body = buffer.slice(bodyStart, fullRequestLength);
+
+    const directory = process.argv.includes('--directory')
+      ? process.argv[process.argv.indexOf('--directory') + 1]
+      : __dirname;
+
+    // Handle echo endpoint with gzip support
+    if (method === 'GET' && requestPath.startsWith('/echo/')) {
+      const textToEcho = requestPath.slice(6);
+      const acceptEncoding = headers['accept-encoding'] || '';
+
+      if (acceptEncoding.includes('gzip')) {
+        const gzipped = zlib.gzipSync(textToEcho);
+        socket.write('HTTP/1.1 200 OK\r\n');
+        socket.write('Content-Encoding: gzip\r\n');
+        socket.write(`Content-Length: ${gzipped.length}\r\n`);
+        socket.write('\r\n');
+        socket.write(gzipped);
+      } else {
+        socket.write('HTTP/1.1 200 OK\r\n');
+        socket.write(`Content-Length: ${Buffer.byteLength(textToEcho)}\r\n`);
+        socket.write('\r\n');
+        socket.write(textToEcho);
+      }
       socket.end();
       return;
     }
 
-    const bodyStart = headerEndIndex + 4;
-    const totalLength = bodyStart + contentLength;
+    // Handle GET /files/{filename}
+    if (method === 'GET' && requestPath.startsWith('/files/')) {
+      const filename = requestPath.slice(7);
+      const filePath = path.join(directory, filename);
 
-    if (buffer.length < totalLength) return; // Wait for full body
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        } else {
+          socket.write('HTTP/1.1 200 OK\r\n');
+          socket.write(`Content-Length: ${data.length}\r\n`);
+          socket.write('\r\n');
+          socket.write(data);
+        }
+        socket.end();
+      });
+      return;
+    }
 
-    const body = buffer.slice(bodyStart, totalLength);
-
+    // Handle POST /files/{filename}
     if (method === 'POST' && requestPath.startsWith('/files/')) {
       const filename = requestPath.slice(7);
-      const directory = process.argv.includes('--directory')
-        ? process.argv[process.argv.indexOf('--directory') + 1]
-        : __dirname;
       const filePath = path.join(directory, filename);
 
       fs.writeFile(filePath, body, (err) => {
@@ -53,10 +91,12 @@ const server = net.createServer((socket) => {
         }
         socket.end();
       });
-    } else {
-      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-      socket.end();
+      return;
     }
+
+    // Catch-all 404
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.end();
   });
 
   socket.on('error', (err) => {
@@ -69,6 +109,5 @@ server.listen(PORT, () => {
   const directory = process.argv.includes('--directory')
     ? process.argv[process.argv.indexOf('--directory') + 1]
     : __dirname;
-
   console.log(`Server running at http://localhost:${PORT}/, serving files from ${directory}`);
 });
