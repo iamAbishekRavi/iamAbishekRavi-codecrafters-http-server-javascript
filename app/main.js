@@ -13,19 +13,24 @@ const server = http.createServer((req, res) => {
   const method = req.method;
   const pathname = url.pathname;
 
+  // Handle GET /
   if (pathname === '/') {
-    res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': '0' });
+    res.writeHead(200, {
+      'Content-Type': 'text/plain',
+      'Content-Length': '0',
+    });
     return res.end();
   }
 
-  // /echo/:text
+  // Handle /echo/:message
   if (pathname.startsWith('/echo/')) {
     const message = pathname.replace('/echo/', '');
-    const acceptedEncodings = req.headers['accept-encoding'] || '';
-    const encodings = acceptedEncodings.split(',').map(e => e.trim().toLowerCase());
+    const encodings = (req.headers['accept-encoding'] || '')
+      .split(',')
+      .map(e => e.trim().toLowerCase());
 
     if (encodings.includes('gzip')) {
-      const buffer = Buffer.from(message, 'utf-8');
+      const buffer = Buffer.from(message);
       zlib.gzip(buffer, (err, compressed) => {
         if (err) {
           res.writeHead(500);
@@ -34,31 +39,31 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, {
           'Content-Type': 'text/plain',
           'Content-Encoding': 'gzip',
-          'Content-Length': compressed.length
+          'Content-Length': compressed.length,
         });
         res.end(compressed);
       });
     } else {
       res.writeHead(200, {
         'Content-Type': 'text/plain',
-        'Content-Length': Buffer.byteLength(message)
+        'Content-Length': Buffer.byteLength(message),
       });
       res.end(message);
     }
     return;
   }
 
-  // /user-agent
+  // Handle /user-agent
   if (pathname === '/user-agent') {
     const ua = req.headers['user-agent'] || '';
     res.writeHead(200, {
       'Content-Type': 'text/plain',
-      'Content-Length': Buffer.byteLength(ua)
+      'Content-Length': Buffer.byteLength(ua),
     });
     return res.end(ua);
   }
 
-  // /files/:filename (GET & POST)
+  // Handle /files/:filename
   if (pathname.startsWith('/files/')) {
     const filename = pathname.replace('/files/', '');
     const filePath = path.join(baseDirectory, filename);
@@ -71,7 +76,7 @@ const server = http.createServer((req, res) => {
         }
         res.writeHead(200, {
           'Content-Type': 'application/octet-stream',
-          'Content-Length': data.length
+          'Content-Length': data.length,
         });
         res.end(data);
       });
@@ -79,22 +84,28 @@ const server = http.createServer((req, res) => {
     }
 
     if (method === 'POST') {
-      const stream = fs.createWriteStream(filePath);
-      req.pipe(stream);
+      let body = Buffer.alloc(0);
+      req.on('data', chunk => {
+        body = Buffer.concat([body, chunk]);
+      });
       req.on('end', () => {
-        res.writeHead(201);
-        res.end();
+        fs.writeFile(filePath, body, err => {
+          if (err) {
+            res.writeHead(500);
+            return res.end();
+          }
+          res.writeHead(201);
+          res.end();
+        });
       });
       return;
     }
   }
 
-  // fallback for unknown paths
+  // Fallback
   res.writeHead(404);
   res.end();
 });
-
 server.listen(port, () => {
   console.log(`Server running at http://localhost:${port}/`);
 });
-
