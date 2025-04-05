@@ -31,9 +31,7 @@ const server = net.createServer((socket) => {
     const contentLength = parseInt(headerMap['content-length'] || '0', 10);
     const acceptEncoding = headerMap['accept-encoding'] || '';
 
-    // -----------------------------
-    // Handle GET /
-    // -----------------------------
+    // GET /
     if (method === 'GET' && requestPath === '/') {
       const body = 'Hello World';
       socket.write('HTTP/1.1 200 OK\r\n');
@@ -44,9 +42,7 @@ const server = net.createServer((socket) => {
       return;
     }
 
-    // -----------------------------
-    // Handle GET /echo/:text
-    // -----------------------------
+    // GET /echo/:text
     if (method === 'GET' && requestPath.startsWith('/echo/')) {
       const echoText = requestPath.slice(6);
       const buffer = Buffer.from(echoText);
@@ -76,9 +72,19 @@ const server = net.createServer((socket) => {
       }
     }
 
-    // -----------------------------
-    // Handle GET /files/:filename
-    // -----------------------------
+    // GET /user-agent
+    if (method === 'GET' && requestPath === '/user-agent') {
+      const userAgent = headerMap['user-agent'] || '';
+      const buffer = Buffer.from(userAgent);
+      socket.write('HTTP/1.1 200 OK\r\n');
+      socket.write(`Content-Length: ${buffer.length}\r\n`);
+      socket.write('\r\n');
+      socket.write(buffer);
+      socket.end();
+      return;
+    }
+
+    // GET /files/:filename
     if (method === 'GET' && requestPath.startsWith('/files/')) {
       const filename = requestPath.slice(7);
       const filePath = path.join(baseDirectory, filename);
@@ -98,9 +104,7 @@ const server = net.createServer((socket) => {
       return;
     }
 
-    // -----------------------------
-    // Handle POST /files/:filename
-    // -----------------------------
+    // POST /files/:filename
     if (method === 'POST' && requestPath.startsWith('/files/')) {
       const filename = requestPath.slice(7);
       const filePath = path.join(baseDirectory, filename);
@@ -108,7 +112,6 @@ const server = net.createServer((socket) => {
 
       if (bodyBuffer.length < contentLength) {
         let remainingData = Buffer.alloc(0);
-
         socket.on('data', (moreChunk) => {
           remainingData = Buffer.concat([remainingData, moreChunk]);
           if (remainingData.length >= contentLength - bodyBuffer.length) {
@@ -137,9 +140,7 @@ const server = net.createServer((socket) => {
       return;
     }
 
-    // -----------------------------
     // Fallback 404
-    // -----------------------------
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.end();
   });
