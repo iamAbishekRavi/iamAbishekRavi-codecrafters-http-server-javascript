@@ -1,81 +1,98 @@
-const net = require("net");// Import the net module to create a TCP server
-const fs = require("fs");// Import the fs module to handle file system operations
-const path = require("path");// Import the path module to handle file and directory paths   
+const net = require("net"); // TCP server module
+const fs = require("fs"); // File system module
+const path = require("path");
 
 const port = 4221;
-let staticDir = process.argv.includes("--directory")
-  ? process.argv[process.argv.indexOf("--directory") + 1]
+const staticDir = process.argv.includes("--directory") //set static directory from command line argument
+  ? process.argv[process.argv.indexOf("--directory") + 1] 
   : process.cwd();
 
-const initiateServer = () => {  // Create a TCP server
-  const srv = net.createServer();
+const server = net.createServer((socket) => {
+  let data = "";
 
-  srv.on("connection", (sock) => {
-    let accumulated = "";
+  socket.on("data", (chunk) => {
+    data += chunk.toString();
 
-    sock.on("data", (buffer) => {
-      accumulated += buffer.toString();
+    const headerEnd = data.indexOf("\r\n\r\n");
+    if (headerEnd === -1) return;
 
-      const splitPoint = accumulated.indexOf("\r\n\r\n");
-      if (splitPoint === -1) return;
+    const headerPart = data.slice(0, headerEnd);
+    const bodyPart = data.slice(headerEnd + 4);
 
-      const headerPart = accumulated.slice(0, splitPoint);
-      const bodyPart = accumulated.slice(splitPoint + 4);
-
-      const lines = headerPart.split("\r\n");
-      const [method, pathUrl] = lines[0].split(" ");
-      const headers = {};
-
-      for (let i = 1; i < lines.length; i++) {
-        const [key, value] = lines[i].split(": ");
-        if (key && value) headers[key.toLowerCase()] = value;
-      }
-
-      if (method === "POST" && pathUrl.startsWith("/files/")) {
-        const fileName = pathUrl.replace("/files/", "");
-        const fileTarget = path.join(staticDir, fileName);
-
-        const declaredLength = parseInt(headers["content-length"], 10);
-        const incomingBody = bodyPart.slice(0, declaredLength);
-
-        fs.writeFileSync(fileTarget, incomingBody);
-
-        const reply = `HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n`;
-        sock.write(reply);
-        sock.end();
-        return;
-      }
-
-      if (method === "GET" && pathUrl.startsWith("/echo/")) {
-        const message = pathUrl.slice("/echo/".length);
-        const encodings = headers["accept-encoding"]
-          ? headers["accept-encoding"].split(",").map(e => e.trim())
-          : [];
-
-        const useGzip = encodings.includes("gzip");
-
-        let responseHeaders = [
-          "HTTP/1.1 200 OK",
-          "Content-Type: text/plain",
-          `Content-Length: ${Buffer.byteLength(message)}`,
-        ];
-        if (useGzip) responseHeaders.push("Content-Encoding: gzip");
-
-        const res = `${responseHeaders.join("\r\n")}\r\n\r\n${message}`;
-        sock.write(res);
-        sock.end();
-        return;
-      }
-
-      // Default fallback
-      sock.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-      sock.end();
+    const lines = headerPart.split("\r\n");
+    const [method, url] = lines[0].split(" ");
+    const headers = {};
+    lines.slice(1).forEach((line) => {
+      const [key, value] = line.split(": ");
+      if (key && value) headers[key.toLowerCase()] = value.trim();
     });
-  });
 
-  srv.listen(port, () => {
-    console.log(`📡 Server on http://localhost:${port} | Static: ${staticDir}`); //Server is listening
-  });
-};
+    // Handles POST /files/{filename}
+    if (method === "POST" && url.startsWith("/files/")) {
+      const filename = url.replace("/files/", "");
+      const fullPath = path.join(staticDir, filename);
+      const contentLength = parseInt(headers["content-length"], 10);
+      const fileData = bodyPart.slice(0, contentLength);
 
-initiateServer();
+      fs.writeFile(fullPath, fileData, () => {
+        const res = `HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n`;
+        socket.write(res);
+        socket.end();
+      });
+      return;
+    }
+
+    // Handles GET /files/{filename}
+    if (method === "GET" && url.startsWith("/files/")) {
+      const filename = url.replace("/files/", "");
+      const fullPath = path.join(staticDir, filename);
+
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath);
+        const res = [
+          "HTTP/1.1 200 OK",
+          "Content-Type: application/octet-stream",
+          `Content-Length: ${content.length}`,
+          "",
+          "",
+        ].join("\r\n");
+        socket.write(res);
+        socket.write(content);
+        socket.end();
+      } else {
+        socket.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+        socket.end();
+      }
+      return;
+    }
+
+    // Handle /echo/{str} endpoints
+    if (method === "GET" && url.startsWith("/echo/")) {
+      const msg = url.slice("/echo/".length);
+      const encodings = headers["accept-encoding"]
+        ? headers["accept-encoding"].split(",").map(e => e.trim())
+        : [];
+      const useGzip = encodings.includes("gzip");
+
+      const resHeaders = [
+        "HTTP/1.1 200 OK",
+        "Content-Type: text/plain",
+        `Content-Length: ${Buffer.byteLength(msg)}`,
+      ];
+      if (useGzip) resHeaders.push("Content-Encoding: gzip");
+
+      const response = `${resHeaders.join("\r\n")}\r\n\r\n${msg}`;
+      socket.write(response);
+      socket.end();
+      return;
+    }
+
+    // Fallback
+    socket.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+    socket.end();
+  });
+});
+
+server.listen(port, () => {
+  console.log(`🚀 Server running on http://localhost:${port}`);
+});
