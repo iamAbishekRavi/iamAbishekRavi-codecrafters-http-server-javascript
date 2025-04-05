@@ -1,98 +1,114 @@
-const net = require("net"); // TCP server module
-const fs = require("fs"); // File system module
+const net = require("net");
+const fs = require("fs");
 const path = require("path");
 
-const port = 4221;
-const staticDir = process.argv.includes("--directory") //set static directory from command line argument
-  ? process.argv[process.argv.indexOf("--directory") + 1] 
-  : process.cwd();
+const directoryArgIndex = process.argv.indexOf("--directory");
+const baseDir = directoryArgIndex !== -1 ? process.argv[directoryArgIndex + 1] : "./app";
 
 const server = net.createServer((socket) => {
-  let data = "";
+  let buffer = "";
 
   socket.on("data", (chunk) => {
-    data += chunk.toString();
+    buffer += chunk.toString();
 
-    const headerEnd = data.indexOf("\r\n\r\n");
-    if (headerEnd === -1) return;
+    if (!buffer.includes("\r\n\r\n")) return;
 
-    const headerPart = data.slice(0, headerEnd);
-    const bodyPart = data.slice(headerEnd + 4);
+    const [headerPart, bodyPart] = buffer.split("\r\n\r\n");
+    const headers = headerPart.split("\r\n");
+    const [method, url, version] = headers[0].split(" ");
 
-    const lines = headerPart.split("\r\n");
-    const [method, url] = lines[0].split(" ");
-    const headers = {};
-    lines.slice(1).forEach((line) => {
-      const [key, value] = line.split(": ");
-      if (key && value) headers[key.toLowerCase()] = value.trim();
-    });
+    const headerMap = {};
+    for (let i = 1; i < headers.length; i++) {
+      const [key, value] = headers[i].split(":").map(s => s.trim());
+      headerMap[key.toLowerCase()] = value;
+    }
 
-    // Handles POST /files/{filename}
-    if (method === "POST" && url.startsWith("/files/")) {
-      const filename = url.replace("/files/", "");
-      const fullPath = path.join(staticDir, filename);
-      const contentLength = parseInt(headers["content-length"], 10);
-      const fileData = bodyPart.slice(0, contentLength);
+    const contentLength = parseInt(headerMap["content-length"] || "0");
+    const fullBody = bodyPart || "";
 
-      fs.writeFile(fullPath, fileData, () => {
-        const res = `HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n`;
-        socket.write(res);
+    // Wait for full body if not complete
+    if (fullBody.length < contentLength) return;
+
+    // Handle /
+    if (url === "/") {
+      socket.write("HTTP/1.1 200 OK\r\n");
+      socket.write("Content-Type: text/plain\r\n");
+      socket.write("Content-Length: 0\r\n");
+      socket.write("\r\n");
+      socket.end();
+      return;
+    }
+
+    // Handle /echo/{str}
+    if (url.startsWith("/echo/")) {
+      const str = url.slice("/echo/".length);
+      const acceptEncoding = headerMap["accept-encoding"] || "";
+      const encodings = acceptEncoding.split(",").map(e => e.trim());
+      const useGzip = encodings.includes("gzip");
+
+      const body = str;
+      socket.write("HTTP/1.1 200 OK\r\n");
+      socket.write("Content-Type: text/plain\r\n");
+      if (useGzip) socket.write("Content-Encoding: gzip\r\n");
+      socket.write(`Content-Length: ${Buffer.byteLength(body)}\r\n`);
+      socket.write("\r\n");
+      socket.write(body);
+      socket.end();
+      return;
+    }
+
+    // Handle /user-agent
+    if (url === "/user-agent") {
+      const userAgent = headerMap["user-agent"] || "";
+      const body = userAgent;
+      socket.write("HTTP/1.1 200 OK\r\n");
+      socket.write("Content-Type: text/plain\r\n");
+      socket.write(`Content-Length: ${Buffer.byteLength(body)}\r\n`);
+      socket.write("\r\n");
+      socket.write(body);
+      socket.end();
+      return;
+    }
+
+    // Handle GET /files/{filename}
+    if (method === "GET" && url.startsWith("/files/")) {
+      const filePath = path.join(baseDir, url.slice("/files/".length));
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+        } else {
+          socket.write("HTTP/1.1 200 OK\r\n");
+          socket.write("Content-Type: application/octet-stream\r\n");
+          socket.write(`Content-Length: ${data.length}\r\n`);
+          socket.write("\r\n");
+          socket.write(data);
+        }
         socket.end();
       });
       return;
     }
 
-    // Handles GET /files/{filename}
-    if (method === "GET" && url.startsWith("/files/")) {
-      const filename = url.replace("/files/", "");
-      const fullPath = path.join(staticDir, filename);
-
-      if (fs.existsSync(fullPath)) {
-        const content = fs.readFileSync(fullPath);
-        const res = [
-          "HTTP/1.1 200 OK",
-          "Content-Type: application/octet-stream",
-          `Content-Length: ${content.length}`,
-          "",
-          "",
-        ].join("\r\n");
-        socket.write(res);
-        socket.write(content);
+    // Handle POST /files/{filename}
+    if (method === "POST" && url.startsWith("/files/")) {
+      const filePath = path.join(baseDir, url.slice("/files/".length));
+      const body = buffer.split("\r\n\r\n")[1];
+      fs.writeFile(filePath, body.slice(0, contentLength), (err) => {
+        if (err) {
+          socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+        } else {
+          socket.write("HTTP/1.1 201 Created\r\n\r\n");
+        }
         socket.end();
-      } else {
-        socket.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-        socket.end();
-      }
+      });
       return;
     }
 
-    // Handle /echo/{str} endpoints
-    if (method === "GET" && url.startsWith("/echo/")) {
-      const msg = url.slice("/echo/".length);
-      const encodings = headers["accept-encoding"]
-        ? headers["accept-encoding"].split(",").map(e => e.trim())
-        : [];
-      const useGzip = encodings.includes("gzip");
-
-      const resHeaders = [
-        "HTTP/1.1 200 OK",
-        "Content-Type: text/plain",
-        `Content-Length: ${Buffer.byteLength(msg)}`,
-      ];
-      if (useGzip) resHeaders.push("Content-Encoding: gzip");
-
-      const response = `${resHeaders.join("\r\n")}\r\n\r\n${msg}`;
-      socket.write(response);
-      socket.end();
-      return;
-    }
-
-    // Fallback
-    socket.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+    // Fallback 404
+    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
     socket.end();
   });
 });
 
-server.listen(port, () => {
-  console.log(`🚀 Server running on http://localhost:${port}`);
+server.listen(4221, () => {
+  console.log("🚀 Server running on http://localhost:4221");
 });
