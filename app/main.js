@@ -1,7 +1,7 @@
 const net = require('net');
-const zlib = require('zlib');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 // Default directory to serve files from
 let baseDirectory = __dirname;
@@ -70,15 +70,11 @@ const server = net.createServer((socket) => {
         return;
       }
 
-      const body = Buffer.alloc(contentLength);
-      let bytesRead = 0;
-
+      let body = Buffer.alloc(0);
       socket.on('data', (chunk) => {
-        chunk.copy(body, bytesRead);
-        bytesRead += chunk.length;
-
-        if (bytesRead >= contentLength) {
-          fs.writeFile(filePath, body, (err) => {
+        body = Buffer.concat([body, chunk]);
+        if (body.length >= contentLength) {
+          fs.writeFile(filePath, body.slice(0, contentLength), (err) => {
             if (err) {
               socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
             } else {
