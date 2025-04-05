@@ -1,103 +1,100 @@
-const net = require("net");
-const fs = require("fs");
-const zlib = require("zlib");
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
 
-const PORT = 4221;
+const port = 4221;
+const baseDirectory = process.argv.includes('--directory')
+  ? process.argv[process.argv.indexOf('--directory') + 1]
+  : path.join(__dirname, 'app');
 
-const directory = process.argv.includes("--directory") ? process.argv[process.argv.indexOf("--directory") + 1] : null;
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const method = req.method;
+  const pathname = url.pathname;
 
-const server = net.createServer((socket) => {
-  socket.on("data", (data) => {
-    const request = data.toString();
-    const [headerPart, bodyPart] = request.split("\r\n\r\n");
-    const headerLines = headerPart.split("\r\n");
-    const [method, path] = headerLines[0].split(" ");
+  if (pathname === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': '0' });
+    return res.end();
+  }
 
-    const headers = {};
-    for (let i = 1; i < headerLines.length; i++) {
-      const [key, ...rest] = headerLines[i].split(":");
-      headers[key.trim().toLowerCase()] = rest.join(":").trim();
-    }
+  // /echo/:text
+  if (pathname.startsWith('/echo/')) {
+    const message = pathname.replace('/echo/', '');
+    const acceptedEncodings = req.headers['accept-encoding'] || '';
+    const encodings = acceptedEncodings.split(',').map(e => e.trim().toLowerCase());
 
-    const respond = (statusCode, statusText, headers, body) => {
-      const headerStrings = Object.entries(headers).map(([k, v]) => `${k}: ${v}`);
-      const response = `HTTP/1.1 ${statusCode} ${statusText}\r\n${headerStrings.join("\r\n")}\r\n\r\n`;
-      socket.write(response);
-      if (body) socket.write(body);
-      socket.end();
-    };
-
-    if (method === "GET" && path === "/") {
-      respond(200, "OK", { "Content-Type": "text/plain", "Content-Length": "0" });
-    }
-
-    else if (method === "GET" && path.startsWith("/echo/")) {
-      const message = path.slice(6);
-      const acceptEncoding = headers["accept-encoding"];
-      const body = Buffer.from(message);
-
-      if (acceptEncoding?.includes("gzip")) {
-        const compressed = zlib.gzipSync(body);
-        respond(200, "OK", {
-          "Content-Type": "text/plain",
-          "Content-Encoding": "gzip",
-          "Content-Length": compressed.length
-        }, compressed);
-      } else {
-        respond(200, "OK", {
-          "Content-Type": "text/plain",
-          "Content-Length": body.length
-        }, body);
-      }
-    }
-
-    else if (method === "GET" && path === "/user-agent") {
-      const userAgent = headers["user-agent"] || "";
-      const body = Buffer.from(userAgent);
-      respond(200, "OK", {
-        "Content-Type": "text/plain",
-        "Content-Length": body.length
-      }, body);
-    }
-
-    else if (method === "POST" && path.startsWith("/files/") && directory) {
-      const filename = path.split("/files/")[1];
-      const filepath = `${directory}/${filename}`;
-      const contentLength = parseInt(headers["content-length"], 10);
-      const bodyBuffer = Buffer.from(bodyPart || "", "utf8");
-
-      if (bodyBuffer.length >= contentLength) {
-        fs.writeFileSync(filepath, bodyBuffer.slice(0, contentLength));
-        respond(201, "Created", { "Content-Type": "text/plain", "Content-Length": "0" });
-      } else {
-        socket.once("data", (moreData) => {
-          const totalBody = Buffer.concat([bodyBuffer, moreData]).slice(0, contentLength);
-          fs.writeFileSync(filepath, totalBody);
-          respond(201, "Created", { "Content-Type": "text/plain", "Content-Length": "0" });
+    if (encodings.includes('gzip')) {
+      const buffer = Buffer.from(message, 'utf-8');
+      zlib.gzip(buffer, (err, compressed) => {
+        if (err) {
+          res.writeHead(500);
+          return res.end();
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/plain',
+          'Content-Encoding': 'gzip',
+          'Content-Length': compressed.length
         });
-      }
+        res.end(compressed);
+      });
+    } else {
+      res.writeHead(200, {
+        'Content-Type': 'text/plain',
+        'Content-Length': Buffer.byteLength(message)
+      });
+      res.end(message);
+    }
+    return;
+  }
+
+  // /user-agent
+  if (pathname === '/user-agent') {
+    const ua = req.headers['user-agent'] || '';
+    res.writeHead(200, {
+      'Content-Type': 'text/plain',
+      'Content-Length': Buffer.byteLength(ua)
+    });
+    return res.end(ua);
+  }
+
+  // /files/:filename (GET & POST)
+  if (pathname.startsWith('/files/')) {
+    const filename = pathname.replace('/files/', '');
+    const filePath = path.join(baseDirectory, filename);
+
+    if (method === 'GET') {
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          res.writeHead(404);
+          return res.end();
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': data.length
+        });
+        res.end(data);
+      });
+      return;
     }
 
-    else if (method === "GET" && path.startsWith("/files/") && directory) {
-      const filename = path.split("/files/")[1];
-      const filepath = `${directory}/${filename}`;
-      if (fs.existsSync(filepath)) {
-        const body = fs.readFileSync(filepath);
-        respond(200, "OK", {
-          "Content-Type": "application/octet-stream",
-          "Content-Length": body.length
-        }, body);
-      } else {
-        respond(404, "Not Found", { "Content-Type": "text/plain", "Content-Length": "0" });
-      }
+    if (method === 'POST') {
+      const stream = fs.createWriteStream(filePath);
+      req.pipe(stream);
+      req.on('end', () => {
+        res.writeHead(201);
+        res.end();
+      });
+      return;
     }
+  }
 
-    else {
-      respond(404, "Not Found", { "Content-Type": "text/plain", "Content-Length": "0" });
-    }
-  });
+  // fallback for unknown paths
+  res.writeHead(404);
+  res.end();
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}/`);
+server.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}/`);
 });
+
