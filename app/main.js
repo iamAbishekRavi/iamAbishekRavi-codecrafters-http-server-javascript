@@ -37,7 +37,9 @@ const server = net.createServer((socket) => {
       ? process.argv[process.argv.indexOf('--directory') + 1]
       : __dirname;
 
-    // Handle echo endpoint with gzip support
+    // -----------------------------
+    // Handle GET /echo/{text}
+    // -----------------------------
     if (method === 'GET' && requestPath.startsWith('/echo/')) {
       const textToEcho = requestPath.slice(6);
       const acceptEncoding = headers['accept-encoding'] || '';
@@ -59,7 +61,9 @@ const server = net.createServer((socket) => {
       return;
     }
 
+    // -----------------------------
     // Handle GET /files/{filename}
+    // -----------------------------
     if (method === 'GET' && requestPath.startsWith('/files/')) {
       const filename = requestPath.slice(7);
       const filePath = path.join(directory, filename);
@@ -69,6 +73,7 @@ const server = net.createServer((socket) => {
           socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
         } else {
           socket.write('HTTP/1.1 200 OK\r\n');
+          socket.write('Content-Type: application/octet-stream\r\n');
           socket.write(`Content-Length: ${data.length}\r\n`);
           socket.write('\r\n');
           socket.write(data);
@@ -78,7 +83,9 @@ const server = net.createServer((socket) => {
       return;
     }
 
+    // -----------------------------
     // Handle POST /files/{filename}
+    // -----------------------------
     if (method === 'POST' && requestPath.startsWith('/files/')) {
       const filename = requestPath.slice(7);
       const filePath = path.join(directory, filename);
@@ -94,7 +101,9 @@ const server = net.createServer((socket) => {
       return;
     }
 
-    // Catch-all 404
+    // -----------------------------
+    // Fallback 404 for everything else
+    // -----------------------------
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.end();
   });
@@ -109,5 +118,6 @@ server.listen(PORT, () => {
   const directory = process.argv.includes('--directory')
     ? process.argv[process.argv.indexOf('--directory') + 1]
     : __dirname;
+
   console.log(`Server running at http://localhost:${PORT}/, serving files from ${directory}`);
 });
