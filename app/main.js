@@ -1,12 +1,12 @@
-const http = require('http');// http is used to create the server
-const fs = require('fs');// fs is used to write files
-const path = require('path');// path is used to join paths
-const zlib = require('zlib');// zlib is used to compress the response
-const url = require('url');// url is used to parse the request URL
+const http = require('http');//import http from 'http'; // ES6 import syntax
+const fs = require('fs');//import fs from 'fs'; // ES6 import syntax
+const path = require('path');//import path from 'path'; // ES6 import syntax
+const zlib = require('zlib');
+const url = require('url');
 
 const port = 4221;
 
-// Extract --directory flag
+// Extract directory from command line
 const directoryFlagIndex = process.argv.indexOf('--directory');
 const baseDirectory = directoryFlagIndex !== -1 ? process.argv[directoryFlagIndex + 1] : './';
 
@@ -15,7 +15,7 @@ const server = http.createServer((req, res) => {
   const method = req.method;
   const pathname = parsedUrl.pathname || '';
 
-  // Handle /echo/{str} with optional gzip
+  // GET /echo/{str}sss
   if (method === 'GET' && pathname.startsWith('/echo/')) {
     const str = pathname.replace('/echo/', '');
     const acceptEncoding = req.headers['accept-encoding'] || '';
@@ -44,20 +44,19 @@ const server = http.createServer((req, res) => {
       res.end(body);
     }
 
-  // Handle POST /files/{filename}
-  } else if (method === 'POST' && pathname.startsWith('/files/')) {
+  // POST /files/{filename}
+    } else if (method === 'POST' && pathname.startsWith('/files/')) {
     const filename = pathname.replace('/files/', '');
     const filePath = path.join(baseDirectory, filename);
     const contentLength = parseInt(req.headers['content-length'], 10);
-
     let data = Buffer.alloc(0);
 
     req.on('data', chunk => {
-      data = Buffer.concat([data, chunk]);
+      data = Buffer.concat([data, chunk]); // Concatenate the new chunk to the existing data
       if (data.length > contentLength) {
-        req.destroy(); // avoid overflow
-      }
-    });
+        req.destroy();
+       }
+      });
 
     req.on('end', () => {
       fs.writeFile(filePath, data, (err) => {
@@ -68,16 +67,34 @@ const server = http.createServer((req, res) => {
           res.writeHead(201);
           res.end();
         }
-      });
-    });
+        });
+     });
+ 
+  // GET /files/{filename}
+  } else if (method === 'GET' && pathname.startsWith('/files/')) {
+    const filename = pathname.replace('/files/', '');
+    const filePath = path.join(baseDirectory, filename);
 
-  // Default: 404
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end();
+      } else {
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': data.length
+        });
+        res.end(data);
+       }
+     });
+
+   // All else: 404
   } else {
     res.writeHead(404);
     res.end();
-  }
-});
+   }
+ });
 
 server.listen(port, () => {
   console.log(`🚀 Server running on http://localhost:${port}`);
-});
+      });
